@@ -16,16 +16,6 @@ This project implements **two Sprint 2 features** using MERN Stack and MVC archi
 
 It also includes basic complaint creation (with unique complaint ID) so status tracking can be tested immediately.
 
-## Architecture
-
-- **Backend (Express + MongoDB)**:
-  - **Models** in `backend/src/models` (e.g., `Complaint.js`) define the data structure and validation.
-  - **Controllers** in `backend/src/controllers` (e.g., `complaintController.js`) contain the request-handling logic and call the models.
-  - **Routes** in `backend/src/routes` (e.g., `complaintRoutes.js`) map HTTP endpoints to controller functions.
-- **Frontend (React SPA)**:
-  - The **View** is implemented as React components in `frontend/src` (e.g., `App.jsx`), which render the UI.
-  - The frontend never accesses the database directly; it calls the backend controllers through API helper functions in `frontend/src/api/complaintApi.js`.
-
 ## Project Structure
 
 ```text
@@ -115,4 +105,3 @@ Frontend runs on `http://localhost:5173`
 3. Track status using that ID.
 4. Use admin section to change status and priority.
 5. Track again to confirm both updates.
-
