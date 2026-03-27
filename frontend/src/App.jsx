@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import {
+  addProgressUpdate,
+  assignComplaint,
   createComplaint,
   getComplaintHistory,
+  getComplaintMapLocations,
   getComplaintStatus,
   getUsers,
   login as loginUser,
@@ -13,6 +16,7 @@ import {
   updateUserRole,
   verifyLoginOtp
 } from "./api/complaintApi";
+import ComplaintsMap from "./components/ComplaintsMap.jsx";
 
 const STATUS_VALUES = ["Pending", "Assigned", "In Progress", "Resolved", "Rejected"];
 const PRIORITY_VALUES = ["Low", "Medium", "High", "Emergency"];
@@ -26,6 +30,14 @@ const formatDate = (value) => {
 
   return new Date(value).toLocaleString();
 };
+
+const fileToDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 
 export default function App() {
   const [authMode, setAuthMode] = useState("signup");
@@ -42,6 +54,10 @@ export default function App() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [locationAddress, setLocationAddress] = useState("");
+  const [geoLocation, setGeoLocation] = useState(null);
+  const [geoError, setGeoError] = useState("");
+  const [submissionPhotoFile, setSubmissionPhotoFile] = useState(null);
   const [newComplaint, setNewComplaint] = useState(null);
   const [submitError, setSubmitError] = useState("");
   const [suggestions, setSuggestions] = useState([]);
@@ -59,6 +75,13 @@ export default function App() {
   const [users, setUsers] = useState([]);
   const [userAdminMessage, setUserAdminMessage] = useState("");
   const [roleSelections, setRoleSelections] = useState({});
+  const [mapComplaints, setMapComplaints] = useState([]);
+  const [assigneeUserId, setAssigneeUserId] = useState("");
+  const [assignMessage, setAssignMessage] = useState("");
+  const [workComplaintId, setWorkComplaintId] = useState("");
+  const [workUpdateText, setWorkUpdateText] = useState("");
+  const [workPhotoFile, setWorkPhotoFile] = useState(null);
+  const [workMessage, setWorkMessage] = useState("");
 
   useEffect(() => {
     const rawUser = window.localStorage.getItem(STORAGE_KEY);
@@ -106,9 +129,20 @@ export default function App() {
         nextSelections[nextUser.id] = nextUser.role;
       });
       setRoleSelections(nextSelections);
+      const firstAssignable = nextUsers.find((nextUser) => ["Worker", "MP"].includes(nextUser.role));
+      setAssigneeUserId((previous) => previous || firstAssignable?.id || "");
     } catch {
       setUsers([]);
       setRoleSelections({});
+    }
+  };
+
+  const loadMapComplaints = async () => {
+    try {
+      const nextMap = await getComplaintMapLocations();
+      setMapComplaints(nextMap);
+    } catch {
+      setMapComplaints([]);
     }
   };
 
@@ -122,6 +156,16 @@ export default function App() {
 
   useEffect(() => {
     loadUsers();
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setMapComplaints([]);
+      return undefined;
+    }
+
+    loadMapComplaints();
+    return undefined;
   }, [currentUser]);
 
   useEffect(() => {
@@ -141,6 +185,24 @@ export default function App() {
 
     return () => window.clearTimeout(timeoutId);
   }, [title]);
+
+  useEffect(() => {
+    const role = currentUser?.role;
+    const isAssignable = role === "Worker" || role === "MP";
+
+    if (!isAssignable || complaints.length === 0) {
+      return undefined;
+    }
+
+    setWorkComplaintId((previous) => {
+      if (previous && complaints.some((item) => item.complaintId === previous)) {
+        return previous;
+      }
+
+      return complaints[0].complaintId;
+    });
+    return undefined;
+  }, [complaints, currentUser]);
 
   const handleAuthSubmit = async (event) => {
     event.preventDefault();
@@ -184,9 +246,20 @@ export default function App() {
     setCurrentUser(null);
     setComplaints([]);
     setUsers([]);
+    setMapComplaints([]);
     setTrackId("");
     setTrackedComplaint(null);
     setTrackError("");
+    setGeoLocation(null);
+    setGeoError("");
+    setLocationAddress("");
+    setSubmissionPhotoFile(null);
+    setAssigneeUserId("");
+    setAssignMessage("");
+    setWorkComplaintId("");
+    setWorkUpdateText("");
+    setWorkPhotoFile(null);
+    setWorkMessage("");
     setAuthError("");
     setAuthMessage("");
     setRoleSelections({});
@@ -236,6 +309,7 @@ export default function App() {
   const archivedComplaints = complaints.filter((complaint) => complaint.isArchived).length;
   const activeComplaints = totalComplaints - archivedComplaints;
   const isAdmin = currentUser?.role === "Admin" || currentUser?.role === "Super Admin";
+  const isWorkerOrMp = currentUser?.role === "Worker" || currentUser?.role === "MP";
 
   const handleRoleUpdate = async (userId) => {
     setUserAdminMessage("");
@@ -268,12 +342,38 @@ export default function App() {
     setNewComplaint(null);
 
     try {
-      const created = await createComplaint({ title, description, citizenId: currentUser.id });
+      let submissionPhoto = "";
+
+      if (submissionPhotoFile) {
+        submissionPhoto = await fileToDataUrl(submissionPhotoFile);
+      }
+
+      const payload = {
+        title,
+        description,
+        citizenId: currentUser.id,
+        submissionPhoto
+      };
+
+      if (geoLocation) {
+        payload.location = {
+          lat: geoLocation.lat,
+          lng: geoLocation.lng,
+          address: locationAddress
+        };
+      }
+
+      const created = await createComplaint(payload);
       setNewComplaint(created);
       setTitle("");
       setDescription("");
+      setLocationAddress("");
+      setGeoLocation(null);
+      setGeoError("");
+      setSubmissionPhotoFile(null);
       setSuggestions([]);
       await loadComplaints();
+      await loadMapComplaints();
     } catch (error) {
       setSubmitError(error.message);
     }
@@ -297,23 +397,16 @@ export default function App() {
     setAdminMessage("");
 
     try {
-      const updated = await updateComplaintStatus(adminId.trim(), adminStatus);
+      const updated = await updateComplaintStatus(adminId.trim(), adminStatus, currentUser.id);
       setAdminMessage(`Updated ${updated.complaintId} to ${updated.status}`);
 
       if (trackId.trim() === updated.complaintId) {
-        setTrackedComplaint({
-          complaintId: updated.complaintId,
-          title: updated.title,
-          description: updated.description,
-          status: updated.status,
-          priority: updated.priority,
-          isArchived: updated.isArchived,
-          updatedAt: updated.updatedAt,
-          createdAt: updated.createdAt
-        });
+        const tracked = await getComplaintStatus(updated.complaintId);
+        setTrackedComplaint(tracked);
       }
 
       await loadComplaints();
+      await loadMapComplaints();
     } catch (error) {
       setAdminMessage(error.message);
     }
@@ -324,26 +417,96 @@ export default function App() {
     setAdminMessage("");
 
     try {
-      const updated = await updateComplaintPriority(adminId.trim(), adminPriority);
+      const updated = await updateComplaintPriority(adminId.trim(), adminPriority, currentUser.id);
       setAdminMessage(`Updated ${updated.complaintId} priority to ${updated.priority}`);
 
       if (trackId.trim() === updated.complaintId) {
-        setTrackedComplaint((previous) => {
-          if (!previous) {
-            return previous;
-          }
-
-          return {
-            ...previous,
-            priority: updated.priority,
-            updatedAt: updated.updatedAt
-          };
-        });
+        const tracked = await getComplaintStatus(updated.complaintId);
+        setTrackedComplaint(tracked);
       }
 
       await loadComplaints();
+      await loadMapComplaints();
     } catch (error) {
       setAdminMessage(error.message);
+    }
+  };
+
+  const handleUseLocation = () => {
+    setGeoError("");
+
+    if (!navigator.geolocation) {
+      setGeoError("Geolocation is not supported in this browser.");
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setGeoLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        });
+      },
+      () => {
+        setGeoError("Unable to read your location. Allow access in the browser or skip this step.");
+      }
+    );
+  };
+
+  const handleAssignComplaint = async (event) => {
+    event.preventDefault();
+    setAssignMessage("");
+
+    try {
+      const updated = await assignComplaint(adminId.trim(), {
+        adminId: currentUser.id,
+        assigneeUserId
+      });
+      setAssignMessage(`Assigned ${updated.complaintId} to ${updated.assignedTo?.fullName || "assignee"}.`);
+      await loadComplaints();
+      await loadMapComplaints();
+
+      if (trackId.trim() === updated.complaintId) {
+        const tracked = await getComplaintStatus(updated.complaintId);
+        setTrackedComplaint(tracked);
+      }
+    } catch (error) {
+      setAssignMessage(error.message);
+    }
+  };
+
+  const submitWorkerUpdate = async ({ markCompleted }) => {
+    setWorkMessage("");
+
+    if (!workComplaintId.trim()) {
+      setWorkMessage("Select a complaint first.");
+      return;
+    }
+
+    try {
+      let photoUrl = "";
+
+      if (workPhotoFile) {
+        photoUrl = await fileToDataUrl(workPhotoFile);
+      }
+
+      const updated = await addProgressUpdate(workComplaintId.trim(), {
+        workerId: currentUser.id,
+        text: workUpdateText,
+        photoUrl,
+        markCompleted
+      });
+      setWorkMessage(markCompleted ? "Task marked complete and log saved." : "Progress update saved.");
+      setWorkUpdateText("");
+      setWorkPhotoFile(null);
+      await loadComplaints();
+
+      if (trackId.trim() === updated.complaintId) {
+        const tracked = await getComplaintStatus(updated.complaintId);
+        setTrackedComplaint(tracked);
+      }
+    } catch (error) {
+      setWorkMessage(error.message);
     }
   };
 
@@ -446,11 +609,15 @@ export default function App() {
     <div className="container">
       <header className="hero app-hero">
         <p className="eyebrow">ComplaintHub</p>
-        <h1>{isAdmin ? "Admin Dashboard" : "User Dashboard"}</h1>
+        <h1>
+          {isAdmin ? "Admin Dashboard" : isWorkerOrMp ? "Worker / MP Dashboard" : "User Dashboard"}
+        </h1>
         <p className="hero-copy">
           {isAdmin
-            ? "Manage complaints, assign roles, track status, set priorities, and monitor history and archive records."
-            : "Submit complaints, track them by ID, review active and archived history, and use the help center."}
+            ? "Manage complaints, assign workers or MPs, set status and priority, and review map and history."
+            : isWorkerOrMp
+              ? "View assigned complaints, add progress updates with photos, mark tasks complete, and track status by ID."
+              : "Submit complaints with optional photo and map location, track them by ID, browse history, and use the help center."}
         </p>
         <div className="user-banner hero-user-banner">
           <div>
@@ -482,15 +649,53 @@ export default function App() {
         </div>
       </section>
 
-      {!isAdmin ? (
+      <section className="card">
+        <h3>Complaints map (by location)</h3>
+        <p className="small">Pins show complaints that include GPS coordinates. Anyone signed in can view this map.</p>
+        <ComplaintsMap complaints={mapComplaints} />
+      </section>
+
+      {currentUser.role === "Citizen" ? (
         <section className="card">
           <h3>Submit Complaint</h3>
+          <p className="small">Add an optional photo and your location so the issue appears on the map.</p>
           <form onSubmit={handleCreate}>
             <label>Title</label>
             <input value={title} onChange={(event) => setTitle(event.target.value)} required />
 
             <label>Description</label>
             <textarea rows={4} value={description} onChange={(event) => setDescription(event.target.value)} required />
+
+            <label>Photo (optional)</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                setSubmissionPhotoFile(file || null);
+              }}
+            />
+
+            <label>Location address (optional)</label>
+            <input
+              value={locationAddress}
+              onChange={(event) => setLocationAddress(event.target.value)}
+              placeholder="e.g., Dhanmondi 15, Dhaka"
+            />
+
+            <div className="location-row">
+              <button type="button" className="secondary-button" onClick={handleUseLocation}>
+                Use my current location
+              </button>
+              {geoLocation ? (
+                <span className="small geo-hint">
+                  Saved: {geoLocation.lat.toFixed(5)}, {geoLocation.lng.toFixed(5)}
+                </span>
+              ) : (
+                <span className="small geo-hint muted">Location is optional but enables the map pin.</span>
+              )}
+            </div>
+            {geoError ? <div className="error">{geoError}</div> : null}
 
             <button type="submit">Create Complaint</button>
           </form>
@@ -508,19 +713,17 @@ export default function App() {
                     <br />
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
                         setTrackId(complaint.complaintId);
-                        setTrackedComplaint({
-                          complaintId: complaint.complaintId,
-                          title: complaint.title,
-                          description: complaint.description,
-                          status: complaint.status,
-                          priority: complaint.priority,
-                          isArchived: complaint.isArchived,
-                          updatedAt: complaint.updatedAt,
-                          createdAt: complaint.createdAt
-                        });
                         setTrackError("");
+
+                        try {
+                          const full = await getComplaintStatus(complaint.complaintId);
+                          setTrackedComplaint(full);
+                        } catch (error) {
+                          setTrackError(error.message);
+                          setTrackedComplaint(null);
+                        }
                       }}
                     >
                       View Details
@@ -555,8 +758,60 @@ export default function App() {
             <div className="small">Description: {trackedComplaint.description || "N/A"}</div>
             <div className="small">Status: <span className="status-pill">{trackedComplaint.status}</span></div>
             <div className="small">Priority: <span className="status-pill">{trackedComplaint.priority}</span></div>
+            <div className="small">
+              Assigned to:{" "}
+              {trackedComplaint.assignedTo?.fullName
+                ? `${trackedComplaint.assignedTo.fullName} (${trackedComplaint.assignedTo.role})`
+                : "Not assigned yet"}
+            </div>
+            <div className="small">
+              Worker completion: {trackedComplaint.workerTaskCompleted ? "Reported complete" : "Not marked complete"}
+            </div>
             <div className="small">Archive State: {trackedComplaint.isArchived ? "Archived" : "Active"}</div>
             <div className="small">Last Updated: {formatDate(trackedComplaint.updatedAt)}</div>
+            {trackedComplaint.submissionPhoto ? (
+              <div className="tracked-media">
+                <div className="small">Submitted photo</div>
+                <img src={trackedComplaint.submissionPhoto} alt="Complaint submission" className="complaint-photo" />
+              </div>
+            ) : null}
+            {trackedComplaint.location?.lat != null && trackedComplaint.location?.lng != null ? (
+              <div className="tracked-media">
+                <div className="small">Location on map</div>
+                <ComplaintsMap
+                  complaints={[
+                    {
+                      complaintId: trackedComplaint.complaintId,
+                      title: trackedComplaint.title,
+                      status: trackedComplaint.status,
+                      priority: trackedComplaint.priority,
+                      location: trackedComplaint.location
+                    }
+                  ]}
+                />
+              </div>
+            ) : null}
+            {Array.isArray(trackedComplaint.progressLogs) && trackedComplaint.progressLogs.length > 0 ? (
+              <div className="progress-logs">
+                <div className="small"><strong>Progress log</strong></div>
+                <ul>
+                  {[...trackedComplaint.progressLogs]
+                    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+                    .map((log) => (
+                      <li key={log._id || `${log.createdAt}-${log.text}`} className="progress-log-item">
+                        <div className="small">
+                          {formatDate(log.createdAt)} · {log.authorName} ·{" "}
+                          <span className="status-pill">{log.entryType}</span>
+                        </div>
+                        <div>{log.text}</div>
+                        {log.photoUrl ? (
+                          <img src={log.photoUrl} alt="Progress attachment" className="complaint-photo thumb" />
+                        ) : null}
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -631,7 +886,99 @@ export default function App() {
               <button type="submit">Update Priority</button>
             </form>
           </section>
+
+          <section className="card">
+            <h3>Admin: Assign to Worker or MP</h3>
+            <p className="small">Route a complaint to a worker or MP. Status is set to Assigned automatically.</p>
+            <form onSubmit={handleAssignComplaint}>
+              <label>Complaint ID</label>
+              <input value={adminId} onChange={(event) => setAdminId(event.target.value)} required />
+
+              <label>Assignee</label>
+              <select
+                value={assigneeUserId}
+                onChange={(event) => setAssigneeUserId(event.target.value)}
+                required
+              >
+                <option value="" disabled>
+                  Select worker or MP
+                </option>
+                {users
+                  .filter((user) => ["Worker", "MP"].includes(user.role))
+                  .map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.fullName} ({user.role})
+                    </option>
+                  ))}
+              </select>
+
+              <button type="submit" disabled={!assigneeUserId}>
+                Assign complaint
+              </button>
+            </form>
+            {assignMessage ? <div className="small">{assignMessage}</div> : null}
+            {users.filter((user) => ["Worker", "MP"].includes(user.role)).length === 0 ? (
+              <div className="small">No Worker or MP users yet. Promote accounts under User Management first.</div>
+            ) : null}
+          </section>
         </>
+      ) : null}
+
+      {isWorkerOrMp ? (
+        <section className="card">
+          <h3>Worker / MP: Progress updates</h3>
+          <p className="small">
+            Add text and optional photo proof for your assigned complaint, or mark the task complete when finished.
+          </p>
+
+          {complaints.length === 0 ? (
+            <div className="small">No complaints are assigned to you yet.</div>
+          ) : (
+            <>
+              <label>Assigned complaint</label>
+              <select value={workComplaintId} onChange={(event) => setWorkComplaintId(event.target.value)}>
+                {complaints.map((complaint) => (
+                  <option key={complaint._id} value={complaint.complaintId}>
+                    {complaint.complaintId} — {complaint.title}
+                  </option>
+                ))}
+              </select>
+
+              <label>Update details</label>
+              <textarea
+                rows={4}
+                value={workUpdateText}
+                onChange={(event) => setWorkUpdateText(event.target.value)}
+                placeholder="Describe what you did on site..."
+              />
+
+              <label>Photo proof (optional)</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  setWorkPhotoFile(file || null);
+                }}
+              />
+
+              <div className="worker-actions">
+                <button type="button" onClick={() => submitWorkerUpdate({ markCompleted: false })}>
+                  Submit update
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => submitWorkerUpdate({ markCompleted: true })}
+                >
+                  Task completed
+                </button>
+              </div>
+            </>
+          )}
+
+          {workMessage ? <div className="small">{workMessage}</div> : null}
+        </section>
       ) : null}
 
       <section className="card">
@@ -641,7 +988,9 @@ export default function App() {
             <p className="small">
               {currentUser.role === "Admin" || currentUser.role === "Super Admin"
                 ? "Admins can see all complaints and switch between active and archived records."
-                : "Citizens can see their complaint history, including archived resolved or rejected items."}
+                : isWorkerOrMp
+                  ? "You see complaints assigned to you. Use filters to focus on active or archived items."
+                  : "Citizens can see their complaint history, including archived resolved or rejected items."}
             </p>
           </div>
           <div className="filter-row">
@@ -664,6 +1013,15 @@ export default function App() {
             <div className="small">{complaint.description}</div>
             <div className="small">Status: {complaint.status} | Priority: {complaint.priority}</div>
             <div className="small">Submitted by: {complaint.citizenId?.fullName || complaint.submittedBy}</div>
+            {complaint.assignedTo ? (
+              <div className="small">
+                Assigned to: {complaint.assignedTo.fullName} ({complaint.assignedTo.role})
+              </div>
+            ) : null}
+            <div className="small">
+              Map location:{" "}
+              {complaint.location?.lat != null && complaint.location?.lng != null ? "Yes" : "Not provided"}
+            </div>
             <div className="small">Created: {formatDate(complaint.createdAt)}</div>
           </article>
         ))}

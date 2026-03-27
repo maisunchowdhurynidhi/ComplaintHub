@@ -358,6 +358,78 @@ button:hover {
   padding-left: 18px;
 }
 
+.leaflet-map-wrap {
+  margin-top: 12px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.leaflet-map {
+  height: 320px;
+  width: 100%;
+}
+
+.map-empty {
+  margin-top: 8px;
+  color: #64748b;
+}
+
+.map-popup {
+  min-width: 160px;
+}
+
+.location-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0 12px;
+}
+
+.geo-hint {
+  color: #475569;
+}
+
+.geo-hint.muted {
+  color: #94a3b8;
+}
+
+.complaint-photo {
+  max-width: 100%;
+  margin-top: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.complaint-photo.thumb {
+  max-height: 180px;
+  width: auto;
+}
+
+.tracked-media {
+  margin-top: 12px;
+}
+
+.progress-logs {
+  margin-top: 14px;
+}
+
+.progress-log-item {
+  margin: 10px 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.worker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
 @media (max-width: 720px) {
   .container {
     padding: 16px;
