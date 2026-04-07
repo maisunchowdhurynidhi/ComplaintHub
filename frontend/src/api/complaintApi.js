@@ -31,13 +31,13 @@ export const getComplaintStatus = async (complaintId) => {
   return response.json();
 };
 
-export const updateComplaintStatus = async (complaintId, status) => {
+export const updateComplaintStatus = async (complaintId, status, adminId) => {
   const response = await fetch(`${API_BASE_URL}/complaints/${complaintId}/status`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ status })
+    body: JSON.stringify({ status, adminId })
   });
 
   if (!response.ok) {
@@ -47,13 +47,13 @@ export const updateComplaintStatus = async (complaintId, status) => {
   return response.json();
 };
 
-export const updateComplaintPriority = async (complaintId, priority) => {
+export const updateComplaintPriority = async (complaintId, priority, adminId) => {
   const response = await fetch(`${API_BASE_URL}/complaints/${complaintId}/priority`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ priority })
+    body: JSON.stringify({ priority, adminId })
   });
 
   if (!response.ok) {
@@ -173,6 +173,38 @@ export const verifyLoginOtp = async ({ email, otp }) => {
 
 export const getUsers = async (requesterId) => {
   const response = await fetch(`${API_BASE_URL}/auth/users?requesterId=${encodeURIComponent(requesterId)}`);
+
+  if (!response.ok) {
+    throw new Error(await parseError(response));
+  }
+
+  return response.json();
+};
+
+export const assignComplaint = async (complaintId, { adminId, assigneeUserId }) => {
+  const response = await fetch(`${API_BASE_URL}/complaints/${encodeURIComponent(complaintId)}/assign`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ adminId, assigneeUserId })
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseError(response));
+  }
+
+  return response.json();
+};
+
+export const addProgressUpdate = async (complaintId, { workerId, text, photoUrl, markCompleted }) => {
+  const response = await fetch(`${API_BASE_URL}/complaints/${encodeURIComponent(complaintId)}/progress`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ workerId, text, photoUrl, markCompleted })
+  });
 
   if (!response.ok) {
     throw new Error(await parseError(response));
